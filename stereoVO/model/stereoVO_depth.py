@@ -16,8 +16,7 @@ from stereoVO.geometry import (DetectionEngine,
                                MatchingEngine,
                                ArucoDetectionEngine,
                                ArucoMatchingEngine,
-                               get_3d_from_depth,
-                               get_3d_from_depth_with_filter)
+                               get_3d_from_depth)
 
 
 def my_draw_matches(left_kpt, right_kpt, left_img, right_img, window_name="Matched"):
