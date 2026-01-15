@@ -6,7 +6,6 @@ import numpy as np
 
 from stereoVO.configs import yaml_parser
 from stereoVO.datasets import CRCDataset
-from stereoVO.utils import SVO_Plot, rmse_error
 from stereoVO.model import StereoVO
 from vis import draw_cam_poses
 import os, pickle
