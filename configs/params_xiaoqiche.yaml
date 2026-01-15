@@ -35,6 +35,7 @@ geometry:
 
     detection:
         method: 'SIFT'   # 'SIFT' or 'ARUCO' - use SIFT for general scenes
+        nfeatures: 5000  # Limit features for large images (0 = unlimited, slow on 4K images)
 
     featureMatcher:
         method: 'FlannMatcher'

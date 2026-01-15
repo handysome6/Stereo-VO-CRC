@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 __all__ = ['DetectionEngine']
 
@@ -53,18 +54,29 @@ class DetectionEngine():
         """
     
         if self.params.geometry.detection.method == "SIFT":
-            detector = cv2.SIFT_create()
+            # Get optional nfeatures limit from config (default 0 = unlimited)
+            nfeatures = getattr(self.params.geometry.detection, 'nfeatures', 0)
+            detector = cv2.SIFT_create(nfeatures=nfeatures)
+            print(f"  SIFT detector created (nfeatures={nfeatures if nfeatures > 0 else 'unlimited'})")
         else:
             raise NotImplementedError("Feature Detector has not been implemented. Please refer to the Contributing guide and raise a PR")
 
         if len(self.left_frame.shape) == 3:
-            self.left_frame = cv2.cvtColor(self.left_frame.left)
+            self.left_frame = cv2.cvtColor(self.left_frame, cv2.COLOR_BGR2GRAY)
 
         if len(self.right_frame.shape) == 3:
-            self.right_frame = cv2.cvtColor(self.right_frame)
+            self.right_frame = cv2.cvtColor(self.right_frame, cv2.COLOR_BGR2GRAY)
 
+        print(f"  Image size: {self.left_frame.shape[1]}x{self.left_frame.shape[0]}")
+
+        t0 = time.time()
         keyPointsLeft, descriptorsLeft = detector.detectAndCompute(self.left_frame, None)
+        t1 = time.time()
+        print(f"  Left features: {len(keyPointsLeft)} detected in {t1-t0:.2f}s")
+
         keyPointsRight, descriptorsRight = detector.detectAndCompute(self.right_frame, None)
+        t2 = time.time()
+        print(f"  Right features: {len(keyPointsRight)} detected in {t2-t1:.2f}s")
 
         if self.params.debug.plotting.features:
             DetectionEngine.plot_feature(self.left_frame, self.right_frame, keyPointsLeft, keyPointsRight)
@@ -79,7 +91,10 @@ class DetectionEngine():
         else:
             raise NotImplementedError("Feature Matcher has not been implemented. Please refer to the Contributing guide and raise a PR")
 
+        t3 = time.time()
         matches = matcher.knnMatch(descriptorsLeft, descriptorsRight, args_feature_matcher.K)
+        t4 = time.time()
+        print(f"  Feature matching: {len(matches)} matches in {t4-t3:.2f}s")
 
         #Apply ratio test 
         goodMatches = []
