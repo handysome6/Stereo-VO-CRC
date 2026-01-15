@@ -20,6 +20,31 @@ from pathlib import Path
 __all__ = ['ProjectDataset', 'ProjectFileNames']
 
 
+def _imread_unicode(filepath):
+    """
+    Read image from path that may contain Unicode characters (e.g., Chinese).
+
+    cv2.imread() on Windows cannot handle non-ASCII paths directly.
+    This workaround reads file bytes with numpy and decodes with cv2.imdecode().
+
+    Args:
+        filepath: Path to image file (str or Path)
+
+    Returns:
+        Image as numpy array, or None if file cannot be read
+    """
+    try:
+        # Read file as bytes using numpy (handles Unicode paths)
+        with open(str(filepath), 'rb') as f:
+            img_bytes = np.frombuffer(f.read(), dtype=np.uint8)
+        # Decode image from bytes
+        img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
+        return img
+    except Exception as e:
+        print(f"Warning: Failed to read image {filepath}: {e}")
+        return None
+
+
 class ProjectFileNames:
     """Standardized file names for the project structure."""
     RAW_LEFT = "raw_left.jpg"
@@ -229,12 +254,12 @@ class ProjectDataset:
         """
         frame_path = self.frame_folders[index]
 
-        # Load rectified images
+        # Load rectified images (use _imread_unicode for paths with non-ASCII characters)
         left_path = frame_path / ProjectFileNames.RECT_LEFT
         right_path = frame_path / ProjectFileNames.RECT_RIGHT
 
-        img_left = cv2.imread(str(left_path))
-        img_right = cv2.imread(str(right_path)) if right_path.exists() else None
+        img_left = _imread_unicode(left_path)
+        img_right = _imread_unicode(right_path) if right_path.exists() else None
 
         # Convert to grayscale
         if img_left is not None and len(img_left.shape) == 3:
