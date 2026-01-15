@@ -42,7 +42,7 @@ def parse_argument():
     return parser.parse_args()
 
 
-def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01):
+def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01, valid_flags=None):
     """
     Concatenate point clouds from multiple frames using estimated camera poses.
 
@@ -53,7 +53,8 @@ def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01):
         dataset: ProjectDataset instance
         poses: List of 4x4 camera pose matrices
         frame_paths: List of frame folder paths
-        voxel_size: Voxel size for downsampling (meters)
+        voxel_size: Voxel size for downsampling (meters), 0 to disable
+        valid_flags: List of booleans indicating valid poses (skip invalid ones)
 
     Returns:
         combined_pcd: Combined Open3D point cloud in world coordinates
@@ -64,8 +65,15 @@ def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01):
 
     combined_points = []
     combined_colors = []
+    skipped_invalid = 0
 
     for i, (pose, frame_path) in enumerate(zip(poses, frame_paths)):
+        # Skip frames with invalid poses
+        if valid_flags is not None and not valid_flags[i]:
+            print(f"  Frame {i} ({os.path.basename(frame_path)}): SKIPPED (invalid pose)")
+            skipped_invalid += 1
+            continue
+
         # Load point cloud from PLY file
         ply_path = os.path.join(frame_path, ProjectFileNames.CLOUD_PLY)
 
@@ -97,6 +105,9 @@ def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01):
         combined_colors.append(colors)
 
         print(f"  Frame {i} ({os.path.basename(frame_path)}): {len(points)} points transformed")
+
+    if skipped_invalid > 0:
+        print(f"\n  Skipped {skipped_invalid} frames with invalid poses")
 
     if len(combined_points) == 0:
         print("No point clouds to concatenate!")
@@ -179,6 +190,7 @@ def main():
     poses = []
     pose_dict = {}
     frame_paths = []  # Store frame paths for point cloud concatenation
+    pose_valid_flags = []  # Track which poses are valid (successfully estimated)
 
     for index in range(num_frames):
         print(f"\n{'='*60}")
@@ -195,7 +207,7 @@ def main():
             frame_paths.append(frame_path)
 
             # Run VO with depth map
-            pred_location, pred_orientation, pose = model(
+            pred_location, pred_orientation, pose, pose_valid = model(
                 left_frame, right_frame, depth_map, index
             )
         else:
@@ -207,11 +219,16 @@ def main():
             pred_location, pred_orientation, pose = model(
                 left_frame, right_frame, index
             )
+            pose_valid = True  # Original model doesn't track validity
 
         poses.append(pose)
         pose_dict[frame_name] = pose
+        pose_valid_flags.append(pose_valid)
 
-        print(f"Pose for {frame_name}:")
+        if pose_valid:
+            print(f"Pose for {frame_name}: [VALID]")
+        else:
+            print(f"Pose for {frame_name}: [INVALID - kept previous, will skip in PCD concat]")
         print(pose)
 
     # Save poses
@@ -237,7 +254,8 @@ def main():
     if args.concatenate_pcd and use_depth_mode:
         combined_pcd = concatenate_point_clouds(
             dataset, poses, frame_paths,
-            voxel_size=args.pcd_voxel_size
+            voxel_size=args.pcd_voxel_size,
+            valid_flags=pose_valid_flags
         )
 
         if combined_pcd is not None:

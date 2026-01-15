@@ -97,12 +97,13 @@ class StereoVOWithDepth:
             location: (3,) camera translation
             orientation: (3, 3) camera rotation matrix
             T_mat: (4, 4) transformation matrix
+            pose_valid: bool, True if pose was successfully estimated, False if kept previous
         """
         if state_num == 0:
             self._process_first_frame(left_frame, right_frame, depth_map, state_num)
-            return self.prevState.location, self.prevState.orientation, self.prevState.T_mat
+            return self.prevState.location, self.prevState.orientation, self.prevState.T_mat, True
         else:
-            self._process_continuous_frame(left_frame, right_frame, depth_map, state_num)
+            pose_valid = self._process_continuous_frame(left_frame, right_frame, depth_map, state_num)
 
         print("Frame {} Processing Done ...................".format(state_num + 1))
         print("Current Location : X : {x}, Y = {y}, Z = {z}".format(
@@ -112,7 +113,7 @@ class StereoVOWithDepth:
 
         self.prevState = self.currState
 
-        return self.currState.location, self.currState.orientation, self.currState.T_mat
+        return self.currState.location, self.currState.orientation, self.currState.T_mat, pose_valid
 
     def _process_first_frame(self, left_frame, right_frame, depth_map, state_num):
         """Process the first frame to initialize the VO state."""
@@ -133,7 +134,12 @@ class StereoVOWithDepth:
         self.prevState.T_mat = np.eye(4)
 
     def _process_continuous_frame(self, left_frame, right_frame, depth_map, state_num):
-        """Process subsequent frames."""
+        """
+        Process subsequent frames.
+
+        Returns:
+            bool: True if pose was successfully estimated, False if kept previous pose
+        """
         # Initialize current state
         self.currState = VO_StateMachine(state_num)
         self.currState.frames = left_frame, right_frame
@@ -154,7 +160,7 @@ class StereoVOWithDepth:
             self.currState.location = self.prevState.location.copy()
             self.currState.relative_pose = np.eye(4)
             self.currState.T_mat = self.prevState.T_mat.copy()
-            return
+            return False  # Pose estimation failed
 
         # P3P solver to get relative pose
         r_mat, t_vec = self._solve_pnp()
@@ -175,6 +181,8 @@ class StereoVOWithDepth:
         self.currState.T_mat = self.prevState.T_mat @ np.linalg.inv(self.currState.relative_pose)
 
         print("Relative pose:\n", self.currState.relative_pose)
+
+        return True  # Pose estimation succeeded
 
     def _update_stereo_state_with_depth(self, stereoState, depth_map):
         """
