@@ -216,7 +216,10 @@ class StereoVOWithDepth:
             descriptors = stereoState.matchedDescriptors.left
 
         # Get 3D points from depth map (replaces triangulation)
-        pts3D, valid_mask = get_3d_from_depth(keypoints_2d, depth_map, self.intrinsic)
+        # Pass image_shape to support scaled depth maps (e.g., depth at 0.35x resolution)
+        image_shape = left_frame.shape[:2]  # (H, W)
+        pts3D, valid_mask = get_3d_from_depth(keypoints_2d, depth_map, self.intrinsic,
+                                               image_shape=image_shape, interpolate=True)
 
         # Filter based on depth constraints
         depth_valid = np.ones(len(pts3D), dtype=bool)
