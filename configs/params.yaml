@@ -1,0 +1,70 @@
+initial:
+    location: [0,0,0]
+    orientation: [[1,0,0], [0, 1, 0], [0, 0, 1]]
+    inlierRatio: 0.5
+    intrinsic_left: [[5.03535962e+03, 0.00000000e+00, 2.84703403e+03],
+                    [0.00000000e+00, 5.03813141e+03, 1.88368015e+03],
+                    [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+    intrinsic_right: [[5.03535962e+03, 0.00000000e+00, 2.84703403e+03],
+                    [0.00000000e+00, 5.03813141e+03, 1.88368015e+03],
+                    [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+    extrinsic: [[ 1.00000000e+00, 2.61790114e-14, 1.29561976e-14, -9.25217755e-01],
+                [-2.61784769e-14, 1.00000000e+00, -2.57468088e-15, 1.13502415e-19],
+                [-1.29560966e-14, 2.57479693e-15, 1.00000000e+00, 4.33680869e-19],
+                [ 0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]
+
+output:
+    path: './saved_data'
+
+dataset:
+    name: 'Project'  # 'CRC' or 'Project'
+    # For CRC dataset:
+    # path: './data/data_0528/rect_imgs'
+    # For Project dataset (with depth maps):
+    path: './project'
+geometry:
+    # Depth map parameters (for Project dataset with pre-computed depth)
+    depth_min: 0.5      # Minimum valid depth in meters
+    depth_max: 30.0     # Maximum valid depth in meters
+
+    detection:
+        method: 'ARUCO' # 'SIFT' or 'ARUCO'
+    featureMatcher : # Not used when method is 'ARUCO'
+        method: 'FlannMatcher'
+        configs:
+            indexParams:
+                algorithm : 0  #FLANN_INDEX_KDTREE = 0
+                trees : 5
+            searchParams:
+                checks : 50
+            K : 2
+            maxRatio : 0.8
+    epipolarGeometry:
+        numTrials: 5
+        inlierRatio: 0.5
+        method: 8    # ('Ransac' or cv2.RANSAC = 8)
+        probability :  0.9999
+        threshold: 0.8
+    triangulation : 
+        minDistThresh : 2
+        maxRadius : 30
+        repErrThresh : 0.5
+    pnpSolver:
+        method: 'P3P'
+        numTrials: 1
+        deltaT: 1.2
+        minRatio: 0.5
+        iterationsCount: 2000
+        reprojectionError: 1
+        confidence:  0.9999
+    lsqsolver:
+        enable: False
+    bundleAdjustment:
+        enable: False
+debug:
+    my_draw_matches: True
+    plotting :
+        features: False
+        featureMatches : False
+    logging :
+        inliersFilterRANSAC: False
