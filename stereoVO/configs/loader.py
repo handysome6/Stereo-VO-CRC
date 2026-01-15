@@ -56,7 +56,7 @@ def yaml_parser(path):
     if isinstance(path, str):
         path = Path(path)
 
-    with open(path, 'r') as stream:
+    with open(path, 'r', encoding='utf-8') as stream:
         contents = (YAML().load(stream))
 
     return AttrDict(contents)
