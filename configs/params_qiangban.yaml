@@ -1,6 +1,5 @@
-# Configuration for 小汽车 (Small Car) Dataset
+# Configuration for 墙板搬运机器人 (Wall Panel Handling Robot) Dataset
 # Stereo VO with Pre-computed Depth Maps
-# Note: Depth map is at 0.25x scale (1008x759 vs 4032x3036)
 
 initial:
     location: [0, 0, 0]
@@ -22,20 +21,20 @@ initial:
                 [0.0, 0.0, 0.0, 1.0]]
 
 output:
-    path: './saved_data/xiaoqiche'
+    path: './saved_data/qiangban'
 
 dataset:
     name: 'Project'
-    path: 'C:\workspace\stereo_vo_reconstruction\小汽车'
+    path: 'C:\workspace\stereo_vo_reconstruction\墙板搬运机器人'
 
 geometry:
     # Depth map parameters
     depth_min: 0.3       # Minimum valid depth in meters
-    depth_max: 10.0      # Maximum valid depth in meters
+    depth_max: 50.0      # Maximum valid depth in meters
 
     detection:
         method: 'SIFT'   # 'SIFT' or 'ARUCO' - use SIFT for general scenes
-        nfeatures: 5000  # Limit features for large images (0 = unlimited, slow on 4K images)
+        nfeatures: 5000  # Limit features for large images (0 = unlimited)
 
     featureMatcher:
         method: 'FlannMatcher'

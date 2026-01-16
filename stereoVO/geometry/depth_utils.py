@@ -7,9 +7,73 @@ replacing the traditional stereo matching and triangulation steps.
 Supports scaled depth maps where depth_map resolution differs from image resolution.
 """
 
+import cv2
 import numpy as np
+import time
 
-__all__ = ['get_3d_from_depth']
+__all__ = ['get_3d_from_depth', 'DepthModeDetectionEngine']
+
+
+class DepthModeDetectionEngine:
+    """
+    Lightweight feature detection engine for depth mode.
+
+    Only detects features in the left image, skipping right image detection
+    and stereo matching entirely. This is much faster than the traditional
+    DetectionEngine when using pre-computed depth maps.
+
+    Performance improvement:
+    - Skips right image feature detection (~1.5s saved)
+    - Skips stereo matching (~0.7s saved)
+    - Retains more features (no filtering by stereo matching)
+    """
+
+    def __init__(self, left_frame, params):
+        """
+        Args:
+            left_frame: Left camera image (grayscale or BGR)
+            params: Configuration parameters (AttriDict)
+        """
+        self.left_frame = left_frame
+        self.params = params
+
+    def detect_features(self):
+        """
+        Detect features in left image only.
+
+        Returns:
+            keypoints_2d: (N, 2) array of keypoint coordinates
+            descriptors: (N, D) array of feature descriptors
+            keypoints_cv: List of cv2.KeyPoint objects (for compatibility)
+        """
+        if self.params.geometry.detection.method == "SIFT":
+            nfeatures = getattr(self.params.geometry.detection, 'nfeatures', 0)
+            detector = cv2.SIFT_create(nfeatures=nfeatures)
+            print(f"  SIFT detector (depth mode, nfeatures={nfeatures if nfeatures > 0 else 'unlimited'})")
+        else:
+            raise NotImplementedError("Feature detector not implemented for depth mode")
+
+        # Convert to grayscale if needed
+        frame = self.left_frame
+        if len(frame.shape) == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        print(f"  Image size: {frame.shape[1]}x{frame.shape[0]}")
+
+        # Detect features in left image only
+        t0 = time.time()
+        keypoints_cv, descriptors = detector.detectAndCompute(frame, None)
+        t1 = time.time()
+        print(f"  Left features: {len(keypoints_cv)} detected in {t1-t0:.2f}s")
+
+        # Convert keypoints to numpy array
+        keypoints_2d = np.array([kp.pt for kp in keypoints_cv], dtype=np.float64)
+
+        if len(keypoints_2d) == 0:
+            keypoints_2d = np.array([]).reshape(0, 2)
+            descriptors = np.array([]).reshape(0, 128)  # SIFT descriptor size
+
+        return keypoints_2d, descriptors, keypoints_cv
 
 
 def get_3d_from_depth(keypoints_2d, depth_map, K, image_shape=None, interpolate=True):

@@ -15,7 +15,8 @@ from stereoVO.geometry import (DetectionEngine,
                                MatchingEngine,
                                ArucoDetectionEngine,
                                ArucoMatchingEngine,
-                               get_3d_from_depth)
+                               get_3d_from_depth,
+                               DepthModeDetectionEngine)
 
 
 def my_draw_matches(left_kpt, right_kpt, left_img, right_img, window_name="Matched"):
@@ -164,6 +165,15 @@ class StereoVOWithDepth:
         # P3P solver to get relative pose
         r_mat, t_vec = self._solve_pnp()
 
+        # Check if PnP solver failed
+        if r_mat is None or t_vec is None:
+            print("Warning: PnP solver failed, keeping previous pose")
+            self.currState.orientation = self.prevState.orientation.copy()
+            self.currState.location = self.prevState.location.copy()
+            self.currState.relative_pose = np.eye(4)
+            self.currState.T_mat = self.prevState.T_mat.copy()
+            return False  # Pose estimation failed
+
         # Optional optimization
         if self.params.geometry.lsqsolver.enable:
             r_mat, t_vec = self._do_optimization(r_mat, t_vec)
@@ -187,66 +197,61 @@ class StereoVOWithDepth:
         """
         Update stereo state using depth map instead of triangulation.
 
-        This replaces the original _update_stereo_state method which used:
-        - Stereo matching
-        - Epipolar constraint filtering
-        - DLT triangulation
+        Optimized for depth mode:
+        1. Detects features in left image ONLY (skips right image)
+        2. Skips stereo matching entirely
+        3. Gets 3D points directly from depth map
 
-        Now it simply:
-        1. Detects features in left image
-        2. Gets 3D points directly from depth map
+        This is much faster than the original approach which performed:
+        - Right image feature detection (~1.5s)
+        - Stereo matching + ratio test + F-matrix RANSAC (~0.7s)
         """
-        print("Feature Detection (Depth Mode)")
+        print("Feature Detection (Depth Mode - Optimized)")
 
         left_frame = stereoState.frames.left
-        right_frame = stereoState.frames.right
 
-        # Feature detection (only need left image features)
+        # Feature detection - LEFT IMAGE ONLY (no stereo matching)
         if self.feature_detection_method == 'sift':
-            detection_engine = DetectionEngine(left_frame, right_frame, self.params)
-            stereoState.matchedPoints, stereoState.keyPoints, \
-                stereoState.matchedDescriptors, stereoState.descriptors = \
-                detection_engine.get_matching_keypoints()
+            detection_engine = DepthModeDetectionEngine(left_frame, self.params)
+            keypoints_2d, descriptors, keypoints_cv = detection_engine.detect_features()
 
-            # Use left matched points for 3D reconstruction
-            keypoints_2d = stereoState.matchedPoints.left
-            descriptors = stereoState.matchedDescriptors.left
+            # Store for tracking (compatible format with StateBolts)
+            # Use empty list for right side since depth mode doesn't need right features
+            stereoState.keyPoints = (keypoints_cv, [])
+            stereoState.descriptors = (descriptors, np.array([]).reshape(0, 128))
 
         elif self.feature_detection_method == 'aruco':
+            # ArUco still uses both images for now (marker detection is fast)
+            right_frame = stereoState.frames.right
             detection_engine = ArucoDetectionEngine(left_frame, right_frame, self.params)
             stereoState.matchedPoints, stereoState.keyPoints, \
                 stereoState.matchedDescriptors, stereoState.descriptors = \
                 detection_engine.get_matching_keypoints()
 
-            # Use left matched points for 3D reconstruction
             keypoints_2d = stereoState.matchedPoints.left
             descriptors = stereoState.matchedDescriptors.left
 
         # Get 3D points from depth map (replaces triangulation)
-        # Pass image_shape to support scaled depth maps (e.g., depth at 0.35x resolution)
         image_shape = left_frame.shape[:2]  # (H, W)
         pts3D, valid_mask = get_3d_from_depth(keypoints_2d, depth_map, self.intrinsic,
                                                image_shape=image_shape, interpolate=True)
 
-        # Filter based on depth constraints
-        depth_valid = np.ones(len(pts3D), dtype=bool)
-        for i, (x, y, z) in enumerate(pts3D):
-            if not valid_mask[i]:
-                depth_valid[i] = False
-                continue
+        # Filter based on depth constraints (vectorized for speed)
+        if len(pts3D) > 0:
+            z_values = pts3D[:, 2]
+            radii = np.linalg.norm(pts3D, axis=1)
 
-            # Depth range check
-            if z < self.depth_params['min_depth'] or z > self.depth_params['max_depth']:
-                depth_valid[i] = False
-                continue
-
-            # Radial distance check
-            radius = np.sqrt(x ** 2 + y ** 2 + z ** 2)
-            if radius > self.depth_params['max_radius']:
-                depth_valid[i] = False
+            depth_valid = (
+                valid_mask &
+                (z_values >= self.depth_params['min_depth']) &
+                (z_values <= self.depth_params['max_depth']) &
+                (radii <= self.depth_params['max_radius'])
+            )
+        else:
+            depth_valid = np.array([], dtype=bool)
 
         # Apply filter mask
-        final_mask = valid_mask & depth_valid
+        final_mask = depth_valid
 
         # Store filtered results
         stereoState.pts3D = pts3D
@@ -255,9 +260,9 @@ class StereoVOWithDepth:
         stereoState.matchedDescriptors = (descriptors[final_mask], descriptors[final_mask])
         stereoState.ratioTriangulationFilter = np.sum(final_mask) / max(len(final_mask), 1)
 
-        print(f"  Detected {len(keypoints_2d)} features, {np.sum(final_mask)} valid with depth")
+        print(f"  {len(keypoints_2d)} total -> {np.sum(final_mask)} valid with depth ({100*np.sum(final_mask)/max(len(keypoints_2d),1):.1f}%)")
 
-        if self.params.debug.my_draw_matches and right_frame is not None:
+        if self.params.debug.my_draw_matches:
             my_draw_matches(keypoints_2d[final_mask], keypoints_2d[final_mask],
                             left_frame, left_frame, "Features with Valid Depth")
 
@@ -289,30 +294,47 @@ class StereoVOWithDepth:
                             currFrames.left, prevFrames.left, "Tracking Matched")
 
     def _solve_pnp(self):
-        """Solve PnP to estimate relative camera pose."""
+        """
+        Solve PnP to estimate relative camera pose.
+
+        Returns:
+            (r_mat, t_vec): Rotation matrix and translation vector if successful
+            (None, None): If PnP solver fails
+        """
         args_pnpSolver = self.params.geometry.pnpSolver
 
+        r_mat = None
+        t_vec = None
+        idxPose = None
+
         for i in range(args_pnpSolver.numTrials):
-            _, r_vec, t_vec, idxPose = cv2.solvePnPRansac(
+            success, r_vec, t_vec, idxPose = cv2.solvePnPRansac(
                 self.prevState.pts3D_Tracking,
                 self.currState.pointsTracked.left,
                 self.intrinsic,
                 np.array([0.0, 0.0, 0.0, 0.0, 0.0])
             )
 
-            r_mat, _ = cv2.Rodrigues(r_vec)
+            # Check if PnP solver succeeded
+            if not success or idxPose is None or len(idxPose) == 0:
+                print(f"  PnP trial {i+1}/{args_pnpSolver.numTrials}: FAILED (no solution)")
+                continue
 
-            try:
-                idxPose = idxPose.flatten()
-            except:
-                import pdb
-                pdb.set_trace()
+            r_mat, _ = cv2.Rodrigues(r_vec)
+            idxPose = idxPose.flatten()
 
             ratio = len(idxPose) / len(self.prevState.pts3D_Tracking)
             scale = np.linalg.norm(t_vec)
 
+            print(f"  PnP trial {i+1}: inliers={len(idxPose)}, ratio={ratio:.2f}, scale={scale:.3f}")
+
             if scale < args_pnpSolver.deltaT and ratio > args_pnpSolver.minRatio:
                 break
+
+        # Check if we got a valid solution
+        if r_mat is None or idxPose is None:
+            print("  PnP solver failed: no valid solution found")
+            return None, None
 
         # Remove outliers
         self.currState.pointsTracked = (
