@@ -1,1 +1,1 @@
-from .stereoVO import *
+from .stereoVO_depth import StereoVOWithDepth

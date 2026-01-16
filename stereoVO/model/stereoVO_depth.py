@@ -12,7 +12,6 @@ from scipy.optimize import least_squares
 from stereoVO.structures import VO_StateMachine
 from stereoVO.optimization import get_minimization
 from stereoVO.geometry import (DetectionEngine,
-                               TrackingEngine,
                                MatchingEngine,
                                ArucoDetectionEngine,
                                ArucoMatchingEngine,
@@ -266,16 +265,8 @@ class StereoVOWithDepth:
         """Track features between previous and current frames."""
         prevFrames = self.prevState.frames
         currFrames = self.currState.frames
-        prevInliers = self.prevState.InliersFilter
 
-        if self.feature_matching_method == 'tracking':
-            tracker = TrackingEngine(prevFrames, currFrames, prevInliers,
-                                     self.intrinsic, self.params)
-            tracker.process_tracked_features()
-            self.prevState.inliersTracking, self.currState.pointsTracked, \
-                self.prevState.pts3D_Tracking = tracker.filter_inliers(self.prevState.pts3D_Filter)
-
-        elif self.feature_matching_method == 'matching':
+        if self.feature_matching_method == 'matching':
             tracker = MatchingEngine(self.prevState.InliersFilter,
                                      self.prevState.matchedDescriptors,
                                      self.currState.keyPoints,

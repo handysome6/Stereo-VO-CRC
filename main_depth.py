@@ -1,9 +1,8 @@
 """
-Main entry point for Stereo Visual Odometry with Pre-computed Depth Maps.
+Stereo Visual Odometry with Pre-computed Depth Maps.
 
 This script runs the VO pipeline using pre-computed depth maps from the
-Project dataset structure, skipping the traditional stereo matching and
-triangulation steps.
+Project dataset structure, skipping traditional stereo matching and triangulation.
 
 Usage:
     python main_depth.py --config_path configs/params.yaml
@@ -11,7 +10,6 @@ Usage:
     python main_depth.py --config_path configs/params.yaml --concatenate-pcd
 """
 
-import cv2
 import argparse
 import numpy as np
 import open3d as o3d
@@ -19,9 +17,8 @@ import os
 import pickle
 
 from stereoVO.configs import yaml_parser
-from stereoVO.datasets import ProjectDataset, ProjectFileNames, CRCDataset
+from stereoVO.datasets import ProjectDataset, ProjectFileNames
 from stereoVO.model.stereoVO_depth import StereoVOWithDepth
-from stereoVO.model import StereoVO
 from vis import draw_cam_poses
 
 
@@ -42,7 +39,7 @@ def parse_argument():
     return parser.parse_args()
 
 
-def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01, valid_flags=None):
+def concatenate_point_clouds(poses, frame_paths, voxel_size=0.01, valid_flags=None):
     """
     Concatenate point clouds from multiple frames using estimated camera poses.
 
@@ -50,7 +47,6 @@ def concatenate_point_clouds(dataset, poses, frame_paths, voxel_size=0.01, valid
     using the camera pose (T_mat): P_world = T_mat @ P_camera
 
     Args:
-        dataset: ProjectDataset instance
         poses: List of 4x4 camera pose matrices
         frame_paths: List of frame folder paths
         voxel_size: Voxel size for downsampling (meters), 0 to disable
@@ -138,37 +134,21 @@ def main():
     # Load configuration
     params = yaml_parser(args.config_path)
 
-    # Load camera parameters from config
+    # Load camera parameters from config (fallback values)
     intrinsic_left = np.array(params.initial.intrinsic_left)
     intrinsic_right = np.array(params.initial.intrinsic_right)
     extrinsic = np.array(params.initial.extrinsic)
 
-    # Initialize dataset based on type
-    dataset_name = params.dataset.name
+    # Initialize Project dataset with depth maps
     dataset_path = params.dataset.path
+    print(f"Loading dataset from: {dataset_path}")
 
-    print(f"Loading dataset: {dataset_name} from {dataset_path}")
-
-    if dataset_name == 'Project':
-        # Use Project dataset with depth maps
-        dataset = ProjectDataset(
-            dataset_path,
-            intrinsic_l=intrinsic_left,
-            intrinsic_r=intrinsic_right,
-            extrinsic=extrinsic
-        )
-        use_depth_mode = True
-    elif dataset_name == 'CRC':
-        # Use original CRC dataset
-        dataset = CRCDataset(
-            dataset_path,
-            intrinsic_left,
-            intrinsic_right,
-            extrinsic
-        )
-        use_depth_mode = False
-    else:
-        raise ValueError(f"Unknown dataset type: {dataset_name}")
+    dataset = ProjectDataset(
+        dataset_path,
+        intrinsic_l=intrinsic_left,
+        intrinsic_r=intrinsic_right,
+        extrinsic=extrinsic
+    )
 
     num_frames = len(dataset)
     print(f"Total frames: {num_frames}")
@@ -178,48 +158,33 @@ def main():
     projectionMatrixL = dataset.PL
     projectionMatrixR = dataset.PR
 
-    # Initialize the appropriate VO model
-    if use_depth_mode:
-        print("Using Depth Mode (StereoVOWithDepth)")
-        model = StereoVOWithDepth(cameraMatrix, projectionMatrixL, projectionMatrixR, params)
-    else:
-        print("Using Standard Mode (StereoVO)")
-        model = StereoVO(cameraMatrix, projectionMatrixL, projectionMatrixR, params)
+    # Initialize VO model
+    print("Initializing StereoVOWithDepth model")
+    model = StereoVOWithDepth(cameraMatrix, projectionMatrixL, projectionMatrixR, params)
 
     # Process frames
     poses = []
     pose_dict = {}
-    frame_paths = []  # Store frame paths for point cloud concatenation
-    pose_valid_flags = []  # Track which poses are valid (successfully estimated)
+    frame_paths = []
+    pose_valid_flags = []
 
     for index in range(num_frames):
         print(f"\n{'='*60}")
         print(f"Processing frame {index + 1}/{num_frames}")
         print(f"{'='*60}")
 
-        if use_depth_mode:
-            # Load frame with depth map
-            left_frame, right_frame, frame_path = dataset[index]
-            depth_map = dataset.get_depth(index)
+        # Load frame with depth map
+        left_frame, right_frame, frame_path = dataset[index]
+        depth_map = dataset.get_depth(index)
 
-            # Get frame name for saving
-            frame_name = os.path.basename(frame_path)
-            frame_paths.append(frame_path)
+        # Get frame name for saving
+        frame_name = os.path.basename(frame_path)
+        frame_paths.append(frame_path)
 
-            # Run VO with depth map
-            pred_location, pred_orientation, pose, pose_valid = model(
-                left_frame, right_frame, depth_map, index
-            )
-        else:
-            # Original mode without depth
-            left_frame, right_frame, left_img_path = dataset[index]
-            frame_name = "A_" + os.path.split(left_img_path)[-1]
-            frame_paths.append(os.path.dirname(left_img_path))
-
-            pred_location, pred_orientation, pose = model(
-                left_frame, right_frame, index
-            )
-            pose_valid = True  # Original model doesn't track validity
+        # Run VO with depth map
+        pred_location, pred_orientation, pose, pose_valid = model(
+            left_frame, right_frame, depth_map, index
+        )
 
         poses.append(pose)
         pose_dict[frame_name] = pose
@@ -228,7 +193,7 @@ def main():
         if pose_valid:
             print(f"Pose for {frame_name}: [VALID]")
         else:
-            print(f"Pose for {frame_name}: [INVALID - kept previous, will skip in PCD concat]")
+            print(f"Pose for {frame_name}: [INVALID - kept previous]")
         print(pose)
 
     # Save poses
@@ -251,9 +216,9 @@ def main():
         print(f"Poses (text) saved to: {output_txt}")
 
     # Concatenate point clouds if requested
-    if args.concatenate_pcd and use_depth_mode:
+    if args.concatenate_pcd:
         combined_pcd = concatenate_point_clouds(
-            dataset, poses, frame_paths,
+            poses, frame_paths,
             voxel_size=args.pcd_voxel_size,
             valid_flags=pose_valid_flags
         )
