@@ -22,11 +22,11 @@ initial:
                 [0.0, 0.0, 0.0, 1.0]]
 
 output:
-    path: './saved_data/dcim_ai'
+    path: './saved_data/entry'
 
 dataset:
     name: 'Project'
-    path: 'C:\workspace\stereo_vo_reconstruction\DCIM_AI'
+    path: 'C:\workspace\stereo_vo_reconstruction\entry'
 
 geometry:
     # Depth map parameters
